@@ -6,13 +6,6 @@ const nodemailer = require('nodemailer');
 const pool = require('../db');
 
 
-const createdataPrefix = (prefix, company_name) => {
-  const lowercase = company_name.toLowerCase();
-  const companyname = lowercase.replace(/[^a-z0-9_]/g, '');
-  const lowercasePrefix = prefix.toLowerCase();
-  return `${lowercasePrefix}_${companyname}`;
-};
-
 // Create database... 
 const createTable = async (request, response) => {
   request.body.masters.push({
@@ -22,43 +15,51 @@ const createTable = async (request, response) => {
       { "field_name": "user_password", "field_type": "text" },
       { "field_name": "user_type", "field_type": "text", "options": ["admin", "user"] }
     ]
-  });
+  },
+    {
+      "master_name": "invoices",
+      "fields": [
+        { "field_name": "customer_name", "field_type": "text" },
+        { "field_name": "total_amount", "field_type": "numeric" },
+      ]
+    });
 
   const { username, company_name, address, email_id, phone_no, website, gst_number, masters } = request.body;
-  if (!prefix) {
-    response.status(400).json({ error: 'Prefix is required' });
-    return;
-  }
-  const prefixname = createdataPrefix(prefix, company_name);
+
   const password = generator.generate({ length: 10, numbers: true, uppercase: true, strict: true });
 
   console.log(password);
 
   try {
+    const checkTableQuery = `
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_name = 'default_setting''usersingup'
+      )`;
 
-    const dropTableQuery = `DROP TABLE IF EXISTS default_setting , users`;
-    await pool.query(dropTableQuery);
+    const tableExistsResult = await pool.query(checkTableQuery);
 
-    const createtableQuery = `
-  CREATE TABLE default_setting (
-    id SERIAL PRIMARY KEY,
-    username VARCHAR(250) NULL,
-    company_name VARCHAR(250),
-    address VARCHAR(250),
-    email_id VARCHAR(250) NULL,
-    phone_no BIGINT NULL,
-    password VARCHAR(250),
-    website VARCHAR(250),
-    gst_ INTEGER,
-    info JSON
-  )
-`;
-    await pool.query(createtableQuery);
+    if (!tableExistsResult.rows[0].exists) {
+      const createtableQuery = `
+        CREATE TABLE IF NOT EXISTS default_setting ( id SERIAL, username VARCHAR(250) NULL, company_name VARCHAR(250), address VARCHAR(250),  email_id VARCHAR(250) NULL, phone_no BIGINT NULL, password VARCHAR(250), website VARCHAR(250), gst_number INTEGER, info JSON )`;
+      await pool.query(createtableQuery);
+    } if (!tableExistsResult.rows[0].exists) {
+      const userloginQuery =
+        `CREATE TABLE IF NOT EXISTS usersingup (id SERIAL, name VARCHAR(250) NULL, email_id VARCHAR(250) NULL, phone_no BIGINT NULL, password VARCHAR(250) NULL, verificationCode INTEGER)`;
+      await pool.query(userloginQuery);
+    }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    const checkUserQuery = 'SELECT * FROM default_setting WHERE email_id = $1';
+    const userCheckResult = await pool.query(checkUserQuery, [email_id]);
+
+    if (userCheckResult.rows.length > 0) {
+      return response.status(400).json({ error: 'email_id already exists' });
+    }
+
     await pool.query('INSERT INTO default_setting (username, company_name, address, email_id, phone_no, password, website, gst_number, info) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
-      [username, prefixname, address, email_id, phone_no, hashedPassword, website, gst_number, JSON.stringify(request.body)]);
+      [username, company_name, address, email_id, phone_no, hashedPassword, website, gst_number, JSON.stringify(request.body)]);
 
 
     let createTableQuery;
@@ -76,14 +77,16 @@ const createTable = async (request, response) => {
             fieldDefinitions += 'primary key ';
             primaryKeyAdded = true;
           }
-        } else if (field_type.toLowerCase() === 'text' || field_type.toLowerCase() === 'options' || field_type.toLowerCase() === 'email' || field_type.toLowerCase() === 'password') {
+        } else if (field_type.toLowerCase() === 'text' || field_type.toLowerCase() === 'select' || field_type.toLowerCase() === 'email' || field_type.toLowerCase() === 'password') {
           fieldDefinitions += `"${field_name}" varchar(250)`;
-        } else if (field_type.toLowerCase() === 'child') {
+        } else if (field_type.toLowerCase() === 'child' || field_type.toLowerCase() === 'integer') {
           fieldDefinitions += `"${field_name}" int `;
         } else if (field_type.toLowerCase() === 'number') {
           fieldDefinitions += `"${field_name}" bigint `;
         } else if (field_type.toLowerCase() === 'json') {
           fieldDefinitions += `"${field_name}" json `;
+        } else if (field_type.toLowerCase() === 'numeric') {
+          fieldDefinitions += `"${field_name}" numeric `;
         }
         if (i === fields.length - 1) {
           fieldDefinitions += ''
@@ -142,7 +145,7 @@ async function sendOTPEmail(email, password, username, response) {
   };
   try {
     await transporter.sendMail(mailOptions);
-    response.status(200).json({ message: 'Your Organisation Datas Feed Successfully!...', UserName: 'admin', password: password });
+    response.status(200).json({ message: 'Your Organisation Datas Feed Successfully!...', UserName: username, password: password });
   }
   catch (error) {
     console.error('Error:', error);
@@ -236,38 +239,6 @@ const getById = async (request, response) => {
   }
 };
 
-//getparent...
-const getprentlist = async (request, response) => {
-  const fields = request.body;
-  try {
-    if (!Array.isArray(fields)) {
-      return response.status(400).json({ error: 'Invalid request data: fields is not an array' });
-    }
-    const getFieldParentNames = (fields) => {
-      const parentNames = fields
-        .filter(field => field && field.field_type === 'child')
-        .map(field => field && field.parent_name);
-      return [...new Set(parentNames)].filter(name => name);
-    };
-
-    const parentList = getFieldParentNames(fields);
-
-    const parentLists = [];
-    for (const parentName of parentList) {
-      const parentListQuery = `SELECT * FROM ${parentName}`;
-      const { rows } = await pool.query(parentListQuery);
-      parentLists.push({ [parentName]: rows });
-    }
-
-    response.status(200).json({
-      parentLists
-    });
-  } catch (error) {
-    console.error('Error:', error.message);
-    response.status(500).json({ error: 'Failed to get data' });
-  }
-};
-
 //updatedata...
 const updateData = async (request, response) => {
   const { master_name, fields, id } = request.body;
@@ -298,6 +269,81 @@ const deleteData = async (request, response) => {
   }
 };
 
+//getparent...
+const getprentlist = async (request, response) => {
+  const fields = request.body;
+  try {
+    if (!Array.isArray(fields)) {
+      return response.status(400).json({ error: 'Invalid request data: fields is not an array' });
+    }
+    const getFieldParentNames = (fields) => {
+      const parentNames = fields
+        .filter(field => field && field.field_type === 'child')
+        .map(field => field && field.parent_name);
+      return [...new Set(parentNames)].filter(name => name);
+    };
+
+    const parentList = getFieldParentNames(fields);
+
+    const parentLists = [];
+    for (const parentName of parentList) {
+      const parentListQuery = `SELECT * FROM ${parentName}`;
+      const { rows } = await pool.query(parentListQuery);
+      parentLists.push({ [parentName]: rows });
+    }
+    response.status(200).json({ parentLists });
+  } catch (error) {
+    console.error('Error:', error.message);
+    response.status(500).json({ error: 'Failed to get data' });
+  }
+};
+
+//gsr and discount...
+function calculateGST(product_price) {
+  const GST_RATE = 0.18;
+  return product_price * GST_RATE;
+}
+
+//get gst ...
+const getproducts = async (request, responce) => {
+  const productId = request.params.productId;
+  try {
+    const result = await pool.query('SELECT product_price FROM product WHERE product_id = $1', [productId]);
+    if (result.rows.length === 0) {
+      return responce.status(404).json({ message: 'Product not found' });
+    }
+    const price = result.rows[0].product_price;
+    const gstAmount = calculateGST(price);
+    return responce.json({ gstAmount });
+  } catch (error) {
+    console.error('Error executing query', error);
+    return responce.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+//add invoice...
+const createinvoice = async (request, response) => {
+  const { customerName, productId, discount } = request.body;
+  try {
+    const productResult = await pool.query('SELECT product_price FROM product WHERE product_id = $1', [productId]);
+    if (productResult.rows.length === 0) {
+      return response.status(404).json({ message: 'Product not found' });
+    }
+    const price = parseFloat(productResult.rows[0].product_price);
+    const gstAmount = parseFloat(calculateGST(price));
+    const totalAmount = price + gstAmount - discount;
+
+    const invoiceResult = await pool.query('INSERT INTO invoices (customer_name, total_amount) VALUES ($1, $2) RETURNING invoices_id', [customerName, totalAmount]);
+    const invoiceId = invoiceResult.rows[0].id;
+    return response.json({ invoiceId, totalAmount });
+  } catch (error) {
+    console.error('Error executing query', error);
+    return response.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+
+
 
 //modules...
 module.exports = {
@@ -308,5 +354,7 @@ module.exports = {
   updateData,
   deleteData,
   getprentlist,
-  getById
+  getById,
+  getproducts,
+  createinvoice,
 }

@@ -30,15 +30,6 @@ const pool = new Pool({
 
 
 
-
-
-
-
-
-
-
-
-
 // const getColumns = async (req, res) => {
 //   const master_name = req.body.master_name;
 //   const { prefixedDatabaseName } = req.body;
@@ -107,6 +98,24 @@ const pool = new Pool({
 
 
 
+// const dropTableQuery = `DROP TABLE IF EXISTS default_setting , users`;
+// await pool.query(dropTableQuery);
+
+// const createtableQuery = `
+// CREATE TABLE default_setting (
+// id SERIAL PRIMARY KEY,
+// username VARCHAR(250) NULL,
+// company_name VARCHAR(250),
+// address VARCHAR(250),
+// email_id VARCHAR(250) NULL,
+// phone_no BIGINT NULL,
+// password VARCHAR(250),
+// website VARCHAR(250),
+// gst_ INTEGER,
+// info JSON
+// )
+// `;
+// await pool.query(createtableQuery);
 
 
 

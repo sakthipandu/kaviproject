@@ -1,6 +1,6 @@
 const express = require('express');
 const bodyParser = require('body-parser');
-const dataRouter = require('./project/router');
+const dataRouter = require('./conroller/router');
 require('dotenv').config();
 const cors = require('cors')
 
